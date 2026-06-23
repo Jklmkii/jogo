@@ -1,16 +1,14 @@
 import pygame
 import sys
 
-# Configurações Iniciais - 1024x640
 TILE = 64
 pygame.init()
 screen = pygame.display.set_mode((1024, 640))
-pygame.display.set_caption("Caverna do Dragao ")
+pygame.display.set_caption("Caverna do Dragao - Edicao Teoria dos Grafos")
 font = pygame.font.SysFont(None, 32)
 font_small = pygame.font.SysFont(None, 20)
 clock = pygame.time.Clock()
 
-# Matrizes dos Níveis
 levels = [
     [
         "########",
@@ -62,13 +60,42 @@ levels = [
         "#.....B...N#",
         "#........D.#",
         "############"
+    ],
+    [
+        "#############",
+        "#P.#.......##",
+        "#..#.#.###.##",
+        "##...#.#...##",
+        "####.#.#.####",
+        "#....#.#...##",
+        "#.####.###.##",
+        "#..........D#",
+        "#############"
+    ],
+    [
+        "########",
+        "#P.....#",
+        "######.#",
+        "#......#",
+        "#.######",
+        "#.....D#",
+        "########"
+    ],
+    [
+        "#############",
+        "#.....#.....#",
+        "#..P..#..D..#",
+        "#.....#.....#",
+        "#####.#.#####",
+        "#...........#",
+        "#############"
     ]
 ]
 
 level = 0
 player = [1, 1]
 msg = ""
-msg_timer = 0         
+msg_timer = 0        
 dialog_active = False
 game_over = False
 victory = False        
@@ -78,7 +105,16 @@ pulse_radius = 0.0
 pulse_origin = [0, 0]
 pulse_distances = {}
 
-# --- BANCO DE DADOS DE ITENS ---
+shortest_path_tiles = []   
+player_steps = 0           
+max_steps_allowed = 0      
+
+hamiltonian_total = 0      
+hamiltonian_visited = set()
+
+torches_placed = set()     
+torches_limit = 12         
+
 ITEM_DATA = {
     "Chave":             {"weight": 1,  "rarity": 3, "rarity_name": "Epico",  "value": 50},
     "Ossos":             {"weight": 2,  "rarity": 1, "rarity_name": "Comum",  "value": 5},
@@ -90,8 +126,6 @@ ITEM_DATA = {
 inventory = []
 sort_mode = "peso"
 sort_algo = "quicksort"
-
-# ─── Algoritmos de Ordenação ────────────────────────────────────────────────
 
 def quick_sort(arr, key_func):
     if len(arr) <= 1:
@@ -150,25 +184,36 @@ def apply_sorting():
     elif sort_mode == "valor":
         inventory = heap_sort(inventory, lambda x: x["value"])
 
-# ─── BFS / Sensor de Rota ───────────────────────────────────────────────────
-
 def run_bfs():
-
-    global pulse_distances
+    global pulse_distances, shortest_path_tiles
     pulse_distances = {}
+    shortest_path_tiles = []
+    
     queue   = [(player[0], player[1], 0)]
     visited = {(player[0], player[1])}
+    parent  = {} 
+    target_pos = None
+    
     while queue:
         cx, cy, dist = queue.pop(0)
         pulse_distances[(cx, cy)] = dist
+        
+        if grid[cy][cx] in ("D", "K") and target_pos is None:
+            target_pos = (cx, cy)
+            
         for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
             nx, ny = cx + dx, cy + dy
             if 0 <= ny < len(grid) and 0 <= nx < len(grid[ny]):
                 if grid[ny][nx] not in ("#", "I") and (nx, ny) not in visited:
                     visited.add((nx, ny))
+                    parent[(nx, ny)] = (cx, cy)
                     queue.append((nx, ny, dist + 1))
-
-# ─── Estado dos Baús ────────────────────────────────────────────────────────
+                    
+    if target_pos in parent:
+        curr = target_pos
+        while curr in parent:
+            shortest_path_tiles.append(curr)
+            curr = parent[curr]
 
 chest_dialog = False
 chest_item   = ""
@@ -194,11 +239,12 @@ def chest_item_for(lv, nx, ny):
         if nx == 6  and ny == 5: return "Ossos"
     return "Ouro"
 
-# ─── Carregamento de Nível ──────────────────────────────────────────────────
-
 def load_level(i):
     global grid, player, msg, msg_timer, dialog_active, inventory
     global pulse_active, pulse_distances, chest_dialog
+    global shortest_path_tiles, player_steps, max_steps_allowed
+    global hamiltonian_total, hamiltonian_visited, torches_placed
+    
     grid = [list(r) for r in levels[i]]
     inventory    = []
     msg          = ""
@@ -207,11 +253,29 @@ def load_level(i):
     chest_dialog  = False
     pulse_active  = False
     pulse_distances = {}
+    
+    shortest_path_tiles = []
+    player_steps = 0
+    hamiltonian_visited = set()
+    torches_placed = set()
+    
     for y, row in enumerate(grid):
         for x, c in enumerate(row):
             if c == "P":
                 player = [x, y]
                 grid[y][x] = "."
+                
+    if i == 5: 
+        run_bfs()
+        for (tx, ty), dist in pulse_distances.items():
+            if levels[i][ty][tx] == "D":
+                max_steps_allowed = dist + 4  
+                break
+        pulse_active = False
+        pulse_distances = {}
+    elif i == 6: 
+        hamiltonian_total = sum(row.count(".") for row in grid) + 1  
+        hamiltonian_visited.add((player[0], player[1]))
 
 def set_msg(text, duration=3000):
     """Define uma mensagem com timer automático (ms)."""
@@ -220,8 +284,6 @@ def set_msg(text, duration=3000):
     msg_timer = duration
 
 load_level(level)
-
-# ─── Cores e Renderização ───────────────────────────────────────────────────
 
 TILE_COLORS = {
     "#": (100, 100, 100),
@@ -260,12 +322,9 @@ def draw_tile_detail(surface, c, rx, ry):
         pygame.draw.line(surface, (255, 128, 0), (cx, ry + TILE - 20), (cx + 6, ry + TILE - 14), 3)
         pygame.draw.line(surface, (255, 128, 0), (cx, ry + TILE - 28), (cx + 6, ry + TILE - 22), 3)
 
-# ─── Loop Principal ─────────────────────────────────────────────────────────
-
 while True:
     dt = clock.tick(60)   
 
-    # ── Timer de mensagem ──
     if msg_timer > 0:
         msg_timer -= dt
         if msg_timer <= 0:
@@ -276,7 +335,6 @@ while True:
             pygame.quit()
             sys.exit()
 
-        #  Tela de Vitória 
         if victory:
             if e.type == pygame.KEYDOWN and e.key == pygame.K_r:
                 level = 0
@@ -285,7 +343,6 @@ while True:
                 load_level(level)
             continue
 
-        #  Tela de Fim de Jogo 
         if game_over:
             if e.type == pygame.KEYDOWN and e.key == pygame.K_r:
                 level = 0
@@ -293,7 +350,6 @@ while True:
                 load_level(level)
             continue
 
-        #  chat do Baú 
         if chest_dialog:
             if e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_s:
@@ -309,7 +365,6 @@ while True:
                     chest_dialog = False
             continue
 
-        # Diálogo de NPC
         if dialog_active:
             if e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_s:
@@ -321,7 +376,7 @@ while True:
                             key_props["name"] = "Chave"
                             inventory.append(key_props)
                             apply_sorting()
-                            set_msg("Chave comprada por $50!")
+                            set_msg("Chave bought por $50!")
                         else:
                             set_msg(f"Falta valor! Voce tem ${total_value}/50")
                     else:
@@ -341,18 +396,27 @@ while True:
                     dialog_active = False
             continue
 
-        # Teclas de Jogo
         if e.type == pygame.KEYDOWN:
 
-            # Sensor de Rota (BFS)
             if e.key == pygame.K_t:
                 run_bfs()
                 pulse_active  = True
                 pulse_radius  = 0.0
                 pulse_origin  = list(player)
-                set_msg("Sensor de Rota ativo!")
+                set_msg("Sensor de Rota active!")
 
-            # Ordenação
+            if e.key == pygame.K_SPACE and level == 7:
+                pos = (player[0], player[1])
+                if pos in torches_placed:
+                    torches_placed.remove(pos)
+                    set_msg("Tocha coletada de volta.")
+                else:
+                    if len(torches_placed) < torches_limit:
+                        torches_placed.add(pos)
+                        set_msg(f"Tocha ativada! ({len(torches_placed)}/{torches_limit})")
+                    else:
+                        set_msg("Limite de tochas atingido!")
+
             if e.key == pygame.K_1:
                 sort_mode, sort_algo = "peso", "quicksort"
                 apply_sorting(); set_msg("Ordenado: Peso")
@@ -375,6 +439,21 @@ while True:
             if 0 <= ny < len(grid) and 0 <= nx < len(grid[ny]):
                 t = grid[ny][nx]
                 if t not in ("#", "I"):
+                    
+                    if level == 5:
+                        player_steps += 1
+                        if player_steps > max_steps_allowed:
+                            game_over = True
+                            set_msg("Passos esgotados! Falhou no caminho minimo.")
+                            continue
+                            
+                    if level == 6:
+                        if (nx, ny) in hamiltonian_visited:
+                            set_msg("O chão ruiu! Voce nao pode re-visitar caminhos.")
+                            continue
+                        grid[player[1]][player[0]] = "#" 
+                        hamiltonian_visited.add((nx, ny))
+
                     player = [nx, ny]
 
                     if t == "K":
@@ -393,22 +472,48 @@ while True:
                     if t == "N":
                         dialog_active = True
 
-                    has_key = any(item["name"] == "Chave" for item in inventory)
                     if t == "D":
-                        if has_key:
-                            level += 1
-                            if level >= len(levels):
-                                victory = True          # NOVO: vitória ao completar todos os níveis
-                            else:
+                        if level < 5: 
+                            if any(item["name"] == "Chave" for item in inventory):
+                                level += 1
                                 load_level(level)
-                        else:
-                            set_msg("Porta Trancada!")
+                            else:
+                                set_msg("Porta Trancada!")
+                                
+                        elif level == 5: 
+                            level += 1
+                            load_level(level)
+                            
+                        elif level == 6: 
+                            if len(hamiltonian_visited) == hamiltonian_total:
+                                level += 1
+                                load_level(level)
+                            else:
+                                set_msg(f"Faltam {hamiltonian_total - len(hamiltonian_visited)} blocos para cobrir tudo!")
+                                game_over = True 
+                                
+                        elif level == 7: 
+                            all_covered = True
+                            for cy in range(len(grid)):
+                                for cx in range(len(grid[cy])):
+                                    if grid[cy][cx] == ".":
+                                        covered = any((cx+v[0], cy+v[1]) in torches_placed for v in [(0,0),(0,1),(0,-1),(1,0),(-1,0)])
+                                        if not covered:
+                                            all_covered = False
+                            if all_covered and len(torches_placed) <= torches_limit:
+                                level += 1
+                                if level >= len(levels): 
+                                    victory = True
+                                else: 
+                                    load_level(level)
+                            else:
+                                set_msg(f"Escuridao profunda! Use no maximo {torches_limit} tochas.")
 
     if victory:
         screen.fill((5, 5, 20))
-        lbl1 = font.render("PARABENS! VOCE VENCEU!", True, (255, 215, 0))
-        lbl2 = font_small.render("Voce completou todos os 5 niveis!", True, (180, 180, 255))
-        lbl3 = font_small.render("Pressione [R] para jogar novamente", True, (200, 200, 200))
+        lbl1 = font.render("PARABENS! VOCE VENCEU O DESAFIO", True, (255, 215, 0))
+        lbl2 = font_small.render("Voce completou com sucesso todos os 8 níveis!", True, (180, 180, 255))
+        lbl3 = font_small.render("Pressione [R] para recomecar o jogo", True, (200, 200, 200))
         screen.blit(lbl1, (512 - lbl1.get_width() // 2, 260))
         screen.blit(lbl2, (512 - lbl2.get_width() // 2, 310))
         screen.blit(lbl3, (512 - lbl3.get_width() // 2, 350))
@@ -417,8 +522,8 @@ while True:
 
     if game_over:
         screen.fill((15, 15, 15))
-        lbl_go  = font.render("FIM DE JOGO", True, (255, 215, 0))
-        lbl_rst = font_small.render("Pressione [R] para recomecar da primeira fase", True, (200, 200, 200))
+        lbl_go  = font.render("FIM DE JOGO", True, (255, 50, 50))
+        lbl_rst = font_small.render("Pressione [R] para reiniciar a partir da primeira fase", True, (200, 200, 200))
         screen.blit(lbl_go,  (512 - lbl_go.get_width()  // 2, 280))
         screen.blit(lbl_rst, (512 - lbl_rst.get_width() // 2, 340))
         pygame.display.flip()
@@ -440,9 +545,23 @@ while True:
             pygame.draw.rect(screen, TILE_COLORS.get(c, (30, 30, 30)), r)
             pygame.draw.rect(screen, (60, 60, 60), r, 1)
 
+            if level == 7:
+                is_illuminated = any((x + v[0], y + v[1]) in torches_placed for v in [(0,0), (0,1), (0,-1), (1,0), (-1,0)])
+                if is_illuminated:
+                    glow_layer = pygame.Surface((TILE, TILE))
+                    glow_layer.fill((255, 200, 60))  
+                    glow_layer.set_alpha(65)         
+                    screen.blit(glow_layer, (rx, ry))
+
+            if pulse_active and (x, y) in shortest_path_tiles and level == 5:
+                pygame.draw.circle(screen, (0, 255, 0), (rx + TILE//2, ry + TILE//2), 6)
+
+            if level == 7 and (x, y) in torches_placed:
+                pygame.draw.circle(screen, (255, 69, 0), (rx + TILE//2, ry + TILE//2), 14)
+                pygame.draw.circle(screen, (255, 215, 0), (rx + TILE//2, ry + TILE//2), 8)
+
             draw_tile_detail(screen, c, rx, ry)
 
-            # Onda do sensor BFS
             if pulse_active and (x, y) in pulse_distances:
                 if abs(pulse_radius - pulse_distances[(x, y)]) < 0.7:
                     alpha = 1 - abs(pulse_radius - pulse_distances[(x, y)]) / 0.7
@@ -451,12 +570,10 @@ while True:
                     flash.set_alpha(int(alpha * 180))
                     screen.blit(flash, (rx, ry))
 
-    # Jogador 
     px, py = player[0] * TILE, player[1] * TILE
     pygame.draw.rect(screen, (30, 90, 220), (px + 4, py + 4, TILE - 8, TILE - 8))
-    pygame.draw.circle(screen, (140, 180, 255), (px + TILE // 2, py + 16), 8)   # cabeça
+    pygame.draw.circle(screen, (140, 180, 255), (px + TILE // 2, py + 16), 8)   
 
-    # Inventário
     pygame.draw.rect(screen, (40, 40, 40), (768, 0, 256, 640))
     screen.blit(font.render("Inventario", True, (255, 255, 255)), (785, 15))
     screen.blit(font_small.render(f"Filtro: {sort_mode.upper()}", True, (0, 255, 255)), (785, 45))
@@ -470,16 +587,23 @@ while True:
         det_surf = font_small.render(details, True, (180, 180, 180))
         screen.blit(det_surf, (785, 112 + idx * 45))
 
+    pygame.draw.line(screen, (100, 100, 100), (775, 485), (1015, 485), 1)
+    
+    if level == 5:
+        screen.blit(font_small.render(f"Passos: {player_steps} / {max_steps_allowed}", True, (255, 100, 100)), (785, 495))
+    elif level == 6:
+        screen.blit(font_small.render(f"Nos visitados: {len(hamiltonian_visited)} / {hamiltonian_total}", True, (100, 255, 100)), (785, 495))
+    elif level == 7:
+        screen.blit(font_small.render(f"Tochas: {len(torches_placed)} / {torches_limit} [Espaco]", True, (255, 200, 0)), (785, 495))
+
     pygame.draw.line(screen, (100, 100, 100), (775, 520), (1015, 520), 1)
     screen.blit(font.render(f"Fase {level + 1}", True, (255, 255, 255)), (785, 535))
 
-    # Controles
-    screen.blit(font_small.render("WASD/Setas: mover",   True, (120, 120, 120)), (785, 560))
+    screen.blit(font_small.render("WASD/Setas: mover",    True, (120, 120, 120)), (785, 560))
     screen.blit(font_small.render("T: sensor  1/2/3: ord", True, (120, 120, 120)), (785, 575))
 
     screen.blit(font.render(msg[:18], True, (255, 255, 0)), (785, 600))
 
-    #Caixas de Diálogo
     if dialog_active or chest_dialog:
         overlay = pygame.Surface((1024, 640))
         overlay.set_alpha(180)

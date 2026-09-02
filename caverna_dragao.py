@@ -285,42 +285,65 @@ def set_msg(text, duration=3000):
 
 load_level(level)
 
-TILE_COLORS = {
-    "#": (100, 100, 100),
-    "K": (255, 128,   0),
-    "D": (255, 215,   0),
-    "B": (139,  69,  19),
-    "N": (  0, 180, 255),
-    ".": ( 30,  30,  30),
-    "I": ( 30,  30,  30),
-}
+def create_sprites():
+    sprites = {}
 
-def draw_tile_detail(surface, c, rx, ry):
-    """Desenha detalhes visuais extras sobre tiles especiais."""
-    cx = rx + TILE // 2
-    cy = ry + TILE // 2
+    # Floor ('.' and 'I')
+    floor = pygame.Surface((TILE, TILE))
+    floor.fill((40, 40, 45))
+    pygame.draw.rect(floor, (30, 30, 35), (0, 0, TILE, TILE), 2)
+    pygame.draw.line(floor, (50, 50, 55), (0, TILE//2), (TILE, TILE//2), 1)
+    pygame.draw.line(floor, (50, 50, 55), (TILE//2, 0), (TILE//2, TILE), 1)
+    sprites["."] = floor
+    sprites["I"] = floor
 
-    if c == "B": 
-        inner = pygame.Rect(rx + 8, ry + 8, TILE - 16, TILE - 16)
-        pygame.draw.rect(surface, (92, 58, 30), inner)
-        pygame.draw.rect(surface, (60, 30, 10), (rx + TILE // 2 - 4, ry + TILE // 2 - 4, 8, 8))
+    # Wall ('#')
+    wall = pygame.Surface((TILE, TILE))
+    wall.fill((60, 60, 60))
+    for i in range(0, TILE, 16):
+        pygame.draw.line(wall, (40, 40, 40), (0, i), (TILE, i), 2)
+        for j in range(0, TILE, 32):
+            offset = 16 if (i // 16) % 2 != 0 else 0
+            pygame.draw.line(wall, (40, 40, 40), (j + offset, i), (j + offset, i + 16), 2)
+    sprites["#"] = wall
 
-    elif c == "N":  
-        pygame.draw.circle(surface, (0, 140, 210), (cx, cy), TILE // 3)
-        lbl = font_small.render("N", True, (255, 255, 255))
-        surface.blit(lbl, lbl.get_rect(center=(cx, cy)))
+    # Chest ('B')
+    chest = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
+    pygame.draw.rect(chest, (100, 60, 20), (8, 8, TILE - 16, TILE - 16))
+    pygame.draw.rect(chest, (200, 200, 0), (8, 8, TILE - 16, TILE - 16), 3)
+    pygame.draw.rect(chest, (200, 200, 0), (TILE//2 - 4, TILE//2 - 4, 8, 8))
+    sprites["B"] = chest
 
-    elif c == "D":  
-        inner = pygame.Rect(rx + 10, ry + 6, TILE - 20, TILE - 12)
-        pygame.draw.rect(surface, (200, 170, 0), inner)
-        pygame.draw.rect(surface, (140, 100, 0), (cx - 4, cy - 4, 8, 8))
+    # Door ('D')
+    door = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
+    pygame.draw.rect(door, (130, 90, 40), (10, 6, TILE - 20, TILE - 12))
+    pygame.draw.rect(door, (80, 50, 20), (10, 6, TILE - 20, TILE - 12), 4)
+    pygame.draw.circle(door, (20, 20, 20), (TILE - 16, TILE//2), 4)
+    sprites["D"] = door
 
-    elif c == "K":  
-        pygame.draw.circle(surface, (255, 128, 0), (cx, ry + 20), 10)
-        pygame.draw.circle(surface, (200, 80, 0),  (cx, ry + 20), 10, 2)
-        pygame.draw.line(surface, (255, 128, 0), (cx, ry + 30), (cx, ry + TILE - 12), 4)
-        pygame.draw.line(surface, (255, 128, 0), (cx, ry + TILE - 20), (cx + 6, ry + TILE - 14), 3)
-        pygame.draw.line(surface, (255, 128, 0), (cx, ry + TILE - 28), (cx + 6, ry + TILE - 22), 3)
+    # NPC ('N')
+    npc = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
+    pygame.draw.circle(npc, (0, 150, 255), (TILE//2, TILE//3), 12)
+    pygame.draw.rect(npc, (0, 100, 200), (TILE//2 - 12, TILE//3 + 12, 24, 24))
+    sprites["N"] = npc
+
+    # Key ('K')
+    key = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
+    pygame.draw.circle(key, (255, 215, 0), (TILE//2, TILE//2 - 8), 10, 3)
+    pygame.draw.line(key, (255, 215, 0), (TILE//2, TILE//2 + 2), (TILE//2, TILE - 12), 4)
+    pygame.draw.line(key, (255, 215, 0), (TILE//2, TILE - 16), (TILE//2 + 8, TILE - 16), 3)
+    pygame.draw.line(key, (255, 215, 0), (TILE//2, TILE - 22), (TILE//2 + 8, TILE - 22), 3)
+    sprites["K"] = key
+
+    # Player ('P')
+    player = pygame.Surface((TILE, TILE), pygame.SRCALPHA)
+    pygame.draw.circle(player, (255, 180, 150), (TILE//2, TILE//3), 12)
+    pygame.draw.rect(player, (200, 50, 50), (TILE//2 - 12, TILE//3 + 12, 24, 24))
+    sprites["P"] = player
+
+    return sprites
+
+sprites = create_sprites()
 
 while True:
     dt = clock.tick(60)   
@@ -542,8 +565,9 @@ while True:
             rx, ry = x * TILE, y * TILE
             r = pygame.Rect(rx, ry, TILE, TILE)
 
-            pygame.draw.rect(screen, TILE_COLORS.get(c, (30, 30, 30)), r)
-            pygame.draw.rect(screen, (60, 60, 60), r, 1)
+            if c != "#":
+                screen.blit(sprites["."], (rx, ry))
+            screen.blit(sprites.get(c, sprites["."]), (rx, ry))
 
             if level == 7:
                 is_illuminated = any((x + v[0], y + v[1]) in torches_placed for v in [(0,0), (0,1), (0,-1), (1,0), (-1,0)])
@@ -560,8 +584,6 @@ while True:
                 pygame.draw.circle(screen, (255, 69, 0), (rx + TILE//2, ry + TILE//2), 14)
                 pygame.draw.circle(screen, (255, 215, 0), (rx + TILE//2, ry + TILE//2), 8)
 
-            draw_tile_detail(screen, c, rx, ry)
-
             if pulse_active and (x, y) in pulse_distances:
                 if abs(pulse_radius - pulse_distances[(x, y)]) < 0.7:
                     alpha = 1 - abs(pulse_radius - pulse_distances[(x, y)]) / 0.7
@@ -571,10 +593,10 @@ while True:
                     screen.blit(flash, (rx, ry))
 
     px, py = player[0] * TILE, player[1] * TILE
-    pygame.draw.rect(screen, (30, 90, 220), (px + 4, py + 4, TILE - 8, TILE - 8))
-    pygame.draw.circle(screen, (140, 180, 255), (px + TILE // 2, py + 16), 8)   
+    screen.blit(sprites["P"], (px, py))
 
-    pygame.draw.rect(screen, (40, 40, 40), (768, 0, 256, 640))
+    pygame.draw.rect(screen, (30, 30, 35), (768, 0, 256, 640))
+    pygame.draw.rect(screen, (70, 70, 80), (768, 0, 256, 640), 5)
     screen.blit(font.render("Inventario", True, (255, 255, 255)), (785, 15))
     screen.blit(font_small.render(f"Filtro: {sort_mode.upper()}", True, (0, 255, 255)), (785, 45))
     screen.blit(font_small.render(f"Algo: {sort_algo.upper()}",   True, (200, 200, 200)), (785, 65))
